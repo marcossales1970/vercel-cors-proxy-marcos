@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/proxy.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "node@20.x"
     }
   },
   "rewrites": [
