@@ -1,12 +1,9 @@
 // api/index.js
 const corsAnywhere = require('cors-anywhere'); // Importa a biblioteca cors-anywhere
 
-// ADICIONE ESTAS DUAS LINHAS LOGO ABAIXO DA LINHA DO "require":
-console.log('Type of corsAnywhere:', typeof corsAnywhere);
-console.log('corsAnywhere object/value:', corsAnywhere);
-
 // Cria o middleware do cors-anywhere com as opções desejadas
-const proxy = corsAnywhere({ // Esta é a linha 6 onde o erro ocorre
+// CORREÇÃO AQUI: Chamar .createServer() no objeto corsAnywhere
+const proxy = corsAnywhere.createServer({ // Mudei a linha 9
     originWhitelist: [], // Permitir todas as origens para teste
     // Para produção, considere adicionar sua origem específica para segurança:
     // originWhitelist: ['https://v0-brazilian-portuguese-prompts.vercel.app'],
