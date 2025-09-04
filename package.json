@@ -1,0 +1,12 @@
+{
+  "name": "vercel-cors-proxy-marcos",
+  "version": "1.0.0",
+  "description": "CORS proxy for Vercel",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "cors-anywhere": "^0.4.4"
+  }
+}
