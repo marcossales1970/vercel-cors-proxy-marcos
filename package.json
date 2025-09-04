@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node api/index.js"
   },
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
     "cors-anywhere": "^0.4.4"
   }
