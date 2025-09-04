@@ -1,7 +1,4 @@
 {
-  "functions": {
-    "api/proxy.js": {}
-  },
   "rewrites": [
     {
       "source": "/(.*)",
