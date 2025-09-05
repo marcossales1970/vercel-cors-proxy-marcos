@@ -1,17 +1,15 @@
 {
-  "name": "vercel-simple-cors-proxy",
+  "name": "vercel-cors-proxy-marcos-v2",
   "version": "1.0.0",
-  "description": "Simple CORS proxy for Vercel using Express and Axios",
-  "main": "api/proxy.js",
+  "private": true,
   "scripts": {
     "start": "node api/proxy.js"
   },
+  "main": "api/proxy.js",
   "engines": {
     "node": "20.x"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "cors": "^2.8.5",
-    "axios": "^1.7.2"
+    "node-fetch": "^2.6.7" // <-- VERIFIQUE SE ESTA LINHA ESTÁ AQUI
   }
 }
