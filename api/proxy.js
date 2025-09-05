@@ -1,91 +1,83 @@
 // api/proxy.js
-import fetch from 'node-fetch'; // Garante que o node-fetch esteja importado
+const fetch = require('node-fetch');
 
-export default async function (req, res) {
-  // --- Configuração dos Cabeçalhos CORS (Aplicado a TODAS as respostas) ---
-  // A origem permitida para acessar este proxy. Mantido o seu domínio Vercel.
-  const allowedOrigin = 'https://v0-brazilian-portuguese-prompts.vercel.app';
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+module.exports = async (req, res) => {
+    // A URL de destino é o que vem após a URL do seu proxy.
+    // Ex: proxy.vercel.app/https://script.google.com/macros/s/.../exec
+    const targetUrl = req.url.slice(1); // Remove a barra inicial '/'
 
-  // Métodos HTTP permitidos. Incluí os mais comuns (GET, POST, PUT, DELETE) e OPTIONS para preflight.
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-
-  // Cabeçalhos que o cliente pode enviar. Expandi para incluir headers comuns como Authorization.
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-
-  // Tempo máximo (em segundos) que a resposta de preflight pode ser armazenada em cache pelo navegador.
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
-
-  // --- Tratamento de Requisições de Pré-Voo (Preflight - Método OPTIONS) ---
-  // Se a requisição é OPTIONS, o navegador está apenas verificando as permissões CORS.
-  // Respondemos com 204 (No Content) indicando sucesso sem corpo de resposta.
-  if (req.method === 'OPTIONS') {
-    console.log('Requisição OPTIONS (Preflight) recebida.');
-    return res.status(204).end();
-  }
-
-  // --- Extração da URL de Destino ---
-  // A URL de destino agora DEVE ser passada como um parâmetro de query chamado 'url'.
-  // Exemplo de como usar: SEU_PROXY.vercel.app/api/proxy?url=https://api.seuservico.com/dados
-  const targetUrl = req.query.url;
-
-  // Logs para depuração (pode remover depois que tudo funcionar)
-  console.log('Original req.url (Vercel path):', req.url);
-  console.log('URL de destino extraída do query parameter:', targetUrl);
-
-  // --- Validação da URL de Destino ---
-  if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) {
-    console.error('URL de destino inválida ou ausente:', targetUrl);
-    return res.status(400).send('URL de destino inválida. Deve começar com http:// ou https:// e ser passada como parâmetro "url" na URL do proxy.');
-  }
-
-  try {
-    // --- Filtragem de Cabeçalhos da Requisição Original ---
-    // Remove cabeçalhos que podem causar problemas ou são irrelevantes para a requisição proxy.
-    const filteredHeaders = {};
-    for (const key in req.headers) {
-      if (!['host', 'connection', 'content-length', 'content-encoding', 'x-forwarded-for'].includes(key.toLowerCase())) {
-        filteredHeaders[key] = req.headers[key];
-      }
+    // 1. Validar se a URL de destino foi fornecida
+    if (!targetUrl) {
+        res.status(400).send('URL de destino inválida. Deve ser fornecida após a URL do proxy (ex: /https://api.example.com).');
+        return;
     }
 
-    // --- Preparação do Corpo da Requisição (para POST/PUT/PATCH) ---
-    let requestBody = undefined;
+    // 2. Adicionar os Cabeçalhos CORS na Resposta do Proxy
+    // Esses cabeçalhos informam ao navegador que ele pode fazer requisições cross-origin para este proxy.
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Permite requisições de qualquer origem (ideal para um proxy público)
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE'); // Permite os métodos HTTP comuns
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With'); // Permite cabeçalhos comuns
+
+    // 3. Lidar com Requisições OPTIONS (Preflight)
+    // Para requisições POST e outras que modificam dados, o navegador envia um OPTIONS primeiro.
+    // O proxy precisa responder a essa requisição OPTIONS com sucesso e com os cabeçalhos CORS.
+    if (req.method === 'OPTIONS') {
+        res.status(200).end(); // Responde com sucesso e encerra a requisição OPTIONS
+        return;
+    }
+
+    // 4. Preparar as Opções para a Requisição 'fetch' ao Target
+    const fetchOptions = {
+        method: req.method, // Usa o mesmo método da requisição original (GET, POST, etc.)
+        headers: {} // Inicializa o objeto de cabeçalhos
+    };
+
+    // 5. Copiar Cabeçalhos da Requisição Original
+    // Isso é crucial para que o Content-Type (para POSTs, por exemplo) seja repassado.
+    // Você pode filtrar quais cabeçalhos deseja repassar por segurança.
+    for (const header in req.headers) {
+        // Evitar cabeçalhos que podem causar problemas em proxies (como host)
+        if (header.toLowerCase() !== 'host' && header.toLowerCase() !== 'connection') {
+            fetchOptions.headers[header] = req.headers[header];
+        }
+    }
+
+    // 6. Repassar o Corpo da Requisição Original (para POST, PUT, PATCH)
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      // Se o corpo da requisição já for um objeto (comum para JSONs que o Vercel auto-parseia),
-      // ele é stringificado para ser enviado pelo 'fetch'.
-      if (typeof req.body === 'object' && req.body !== null) {
-        requestBody = JSON.stringify(req.body);
-        // Garante que o Content-Type esteja definido como 'application/json' se estivermos enviando JSON
-        filteredHeaders['Content-Type'] = filteredHeaders['Content-Type'] || 'application/json';
-      } else {
-        // Caso contrário, assume que o corpo já está no formato correto (string, buffer, etc.)
-        requestBody = req.body;
-      }
+        // O corpo da requisição de entrada (`req`) é um stream, precisamos lê-lo.
+        let requestBody = '';
+        for await (const chunk of req) {
+            requestBody += chunk.toString();
+        }
+        if (requestBody) {
+            fetchOptions.body = requestBody;
+        }
     }
 
-    // --- Realiza a Requisição Proxy para a URL de Destino ---
-    const response = await fetch(targetUrl, {
-      method: req.method, // Usa o mesmo método da requisição original
-      headers: filteredHeaders, // Usa os cabeçalhos filtrados
-      body: requestBody, // Envia o corpo processado
-      redirect: 'follow', // Opcional: Segue redirecionamentos da URL de destino
-    });
+    try {
+        // 7. Realizar a Requisição para o Target (a URL real que você quer acessar)
+        const response = await fetch(targetUrl, fetchOptions);
 
-    // --- Copia os Cabeçalhos da Resposta do Servidor de Destino para o Cliente ---
-    response.headers.forEach((value, name) => {
-      // Evita copiar cabeçalhos CORS ou outros que são manipulados pelo Vercel ou podem gerar conflito.
-      if (!['access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers', 'content-encoding', 'transfer-encoding'].includes(name.toLowerCase())) {
-        res.setHeader(name, value);
-      }
-    });
+        // 8. Copiar os Cabeçalhos da Resposta do Target para a Resposta do Proxy
+        // Isso garante que os cabeçalhos importantes da API externa sejam repassados.
+        response.headers.forEach((value, name) => {
+            // Evitar copiar cabeçalhos que podem causar problemas ou não são relevantes
+            if (name.toLowerCase() === 'content-encoding' && value.includes('gzip')) {
+                // Evita problemas de descompressão se o Vercel já for comprimir a resposta
+                return;
+            }
+            res.setHeader(name, value);
+        });
 
-    // --- Envia a Resposta Final para o Cliente ---
-    // Usa 'response.buffer()' para lidar tanto com texto quanto com dados binários de forma versátil.
-    res.status(response.status).send(await response.buffer());
+        // 9. Definir o Status da Resposta do Proxy
+        res.status(response.status);
 
-  } catch (error) {
-    console.error('Erro no Proxy:', error);
-    res.status(500).send(`Erro interno do Proxy. Verifique os logs do Vercel. Detalhe: ${error.message}`);
-  }
-}
+        // 10. Repassar o Corpo da Resposta do Target para o Cliente
+        // 'pipe' é eficiente para streams.
+        response.body.pipe(res);
+
+    } catch (error) {
+        console.error('Erro ao proxyar a requisição:', error);
+        res.status(500).send(`Erro interno do proxy: ${error.message}`);
+    }
+};
