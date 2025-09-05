@@ -10,6 +10,6 @@
     "node": "20.x"
   },
   "dependencies": {
-    "node-fetch": "^2.6.7"  <-- NENHUMA VÍRGULA AQUI SE FOR A ÚLTIMA LINHA
+    "node-fetch": "^2.6.7" 
   }
 }
