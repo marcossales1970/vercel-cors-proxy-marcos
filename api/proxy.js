@@ -1,82 +1,67 @@
 // api/proxy.js
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
+import fetch from 'node-fetch';
 
-const app = express();
-
-// Permite que o servidor Express entenda corpos de requisição JSON
-app.use(express.json());
-// Permite que o servidor Express entenda corpos de requisição URL-encoded
-app.use(express.urlencoded({ extended: true }));
-
-
-// Configura o middleware CORS
-// Para teste, permite todas as origens.
-// Para produção, defina uma whitelist específica para maior segurança.
-app.use(cors({
-  origin: '*', // Permite todas as origens (para teste). Para produção, mude para um array de domínios: ['https://seusite.com']
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Métodos HTTP permitidos
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin'], // Cabeçalhos permitidos
-}));
-
-// Middleware para processar as requisições de proxy
-app.all('/*', async (req, res) => {
-  // Pega a URL destino do restante do caminho da requisição (ex: /https://www.google.com -> https://www.google.com)
-  const targetUrl = req.originalUrl.substring(1);
-
-  // Valida se a URL é válida
-  if (!targetUrl || !targetUrl.startsWith('http')) {
-    return res.status(400).send('URL inválida. Formato esperado: /http(s)://exemplo.com');
-  }
-
-  console.log(`Proxying request to: ${targetUrl}`);
-
+export default async function (req, res) {
   try {
-    const response = await axios({
-      method: req.method, // Usa o mesmo método HTTP da requisição original (GET, POST, etc.)
-      url: targetUrl,
-      headers: {
-        // Repassa alguns cabeçalhos importantes da requisição original,
-        // mas remova aqueles que podem causar problemas ou são irrelevantes para o destino.
-        'User-Agent': req.headers['user-agent'] || 'Vercel-CORS-Proxy', // Garante que há um User-Agent
-        'Accept': req.headers['accept'],
-        'Accept-Encoding': req.headers['accept-encoding'],
-        'Connection': 'keep-alive',
-        // 'Authorization': req.headers['authorization'], // Descomente se precisar repassar tokens de autenticação
-        // 'Content-Type': req.headers['content-type'], // Descomente se precisar repassar o Content-Type para POST/PUT
-      },
-      data: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body, // Repassa o corpo da requisição para POST/PUT
-      responseType: 'arraybuffer', // Para lidar com diferentes tipos de resposta (imagens, JSON, etc.)
-    });
+    console.log('Original req.url:', req.url); // Mantém o log para depuração
 
-    // Repassa os cabeçalhos da resposta do servidor de destino para o cliente
-    for (const header in response.headers) {
-      // Vercel/Next.js adiciona seus próprios cabeçalhos transfer-encoding, então evitamos sobrescrever.
-      if (header.toLowerCase() !== 'transfer-encoding') {
-        res.setHeader(header, response.headers[header]);
+    let decodedUrlPath = decodeURIComponent(req.url.slice(1)); 
+    let targetUrl = decodedUrlPath;
+
+    // --- NOVO CÓDIGO AQUI: Adiciona a segunda barra se estiver faltando ---
+    if (targetUrl.startsWith('http:/') && !targetUrl.startsWith('http://')) {
+        targetUrl = targetUrl.replace('http:/', 'http://');
+    } else if (targetUrl.startsWith('https:/') && !targetUrl.startsWith('https://')) {
+        targetUrl = targetUrl.replace('https:/', 'https://');
+    }
+    // --- FIM DO NOVO CÓDIGO ---
+
+    console.log('Processed targetUrl (after fix):', targetUrl); // Loga a URL após a correção
+
+    if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) {
+        console.error('Invalid target URL detected - Final check failed:', targetUrl); 
+        return res.status(400).send('URL de destino inválida. Deve começar com http:// ou https://.');
+    }
+
+    // --- Tratamento da Requisição de Pré-Voo (OPTIONS) ---
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Origin', 'https://v0-brazilian-portuguese-prompts.vercel.app');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      return res.status(204).end();
+    }
+
+    // --- Restante do seu código (sem alterações a partir daqui) ---
+    const { method, headers, body } = req;
+
+    const filteredHeaders = {};
+    for (const key in headers) {
+      if (!['host', 'connection', 'content-length', 'content-encoding'].includes(key.toLowerCase())) {
+        filteredHeaders[key] = headers[key];
       }
     }
-    res.status(response.status).send(Buffer.from(response.data));
+
+    const response = await fetch(targetUrl, {
+      method: method,
+      headers: filteredHeaders,
+      body: method === 'POST' || method === 'PUT' ? JSON.stringify(body) : undefined,
+    });
+
+    res.setHeader('Access-Control-Allow-Origin', 'https://v0-brazilian-portuguese-prompts.vercel.app');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    response.headers.forEach((value, name) => {
+        if (!['access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers', 'content-encoding'].includes(name.toLowerCase())) {
+            res.setHeader(name, value);
+        }
+    });
+
+    res.status(response.status).send(await response.buffer());
 
   } catch (error) {
-    console.error(`Erro no proxy para ${targetUrl}:`, error.message);
-    if (error.response) {
-      // O servidor de destino respondeu com um status de erro
-      console.error(`Status: ${error.response.status}`);
-      console.error(`Dados do erro: ${error.response.data ? error.response.data.toString() : 'N/A'}`);
-      res.status(error.response.status).send(error.response.data || 'Erro no servidor de destino');
-    } else if (error.request) {
-      // A requisição foi feita mas nenhuma resposta foi recebida
-      console.error('Nenhuma resposta recebida do servidor de destino.');
-      res.status(502).send('Erro: Servidor de destino não respondeu.');
-    } else {
-      // Algo aconteceu na configuração da requisição que disparou um erro
-      console.error('Erro na configuração da requisição de proxy.');
-      res.status(500).send('Erro interno do proxy.');
-    }
+    console.error('Erro no Proxy:', error);
+    res.status(500).send('Erro interno do Proxy. Verifique os logs do Vercel.');
   }
-});
-
-// Exporta a instância do Express app como a função serverless
-module.exports = app;
+}
